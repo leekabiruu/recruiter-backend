@@ -1,8 +1,7 @@
 from flask_restful import Resource, reqparse
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
-from models import db, User,Assessments
-from flask_bcrypt import generate_password_hash, check_password_hash
-
+from werkzeug.security import generate_password_hash, check_password_hash
+from models import db, User, Assessments
 
 
 
@@ -30,7 +29,8 @@ class SignupResource(Resource):
         if User.query.filter_by(email=data["email"]).first():
             return {"message": "User already exists"}, 422
 
-        data["password"] = generate_password_hash(data["password"]).decode("utf-8")
+        # Hash password
+        data["password"] = generate_password_hash(data["password"])
         user = User(**data)
 
         db.session.add(user)
@@ -46,12 +46,8 @@ class SignupResource(Resource):
 
 class LoginResource(Resource):
     parser = reqparse.RequestParser()
-    parser.add_argument(
-        "email", required=True, type=str, help="Email address is required"
-    )
-    parser.add_argument(
-        "password", required=True, type=str, help="Password is required"
-    )
+    parser.add_argument("email", required=True, type=str, help="Email address is required")
+    parser.add_argument("password", required=True, type=str, help="Password is required")
 
     def post(self):
         data = self.parser.parse_args()
@@ -63,19 +59,16 @@ class LoginResource(Resource):
         access_token = create_access_token(identity=str(user.id))
         return {
             "message": "Login successful",
-            
-            "access_token": access_token,
-
+            "access_token": access_token, 
             "user": {
                 "id": user.id,
                 "name": user.name,
                 "email": user.email,
                 "role": user.role,
             },
-            "role": user.role,
+        }, 200
 
-        }, 201
-
+ 
 class RecruiterStatsResource(Resource):
     @jwt_required()
     def get(self):
@@ -87,3 +80,40 @@ class RecruiterStatsResource(Resource):
             "interviewees": interviewees,
             "assessments": assessments,
         }, 200
+
+
+
+class UserDetailResource(Resource):
+    @jwt_required()
+    def get(self, user_id):
+        user = User.query.get_or_404(user_id)
+        return user.to_dict(), 200
+
+    @jwt_required()
+    def put(self, user_id):
+        user = User.query.get_or_404(user_id)
+
+        parser = reqparse.RequestParser()
+        parser.add_argument("name", type=str)
+        parser.add_argument("email", type=str)
+        parser.add_argument("password", type=str)
+        data = parser.parse_args()
+
+        if data.get("name"):
+            user.name = data["name"]
+        if data.get("email"):
+            if User.query.filter(User.email == data["email"], User.id != user_id).first():
+                return {"message": "Email already taken"}, 422
+            user.email = data["email"]
+        if data.get("password"):
+            user.password = generate_password_hash(data["password"])
+
+        db.session.commit()
+        return {"message": "User updated", "user": user.to_dict()}, 200
+
+    @jwt_required()
+    def delete(self, user_id):
+        user = User.query.get_or_404(user_id)
+        db.session.delete(user)
+        db.session.commit()
+        return {"message": "User deleted"}, 200
